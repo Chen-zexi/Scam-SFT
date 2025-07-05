@@ -13,6 +13,8 @@ The pipeline consists of the following modular components:
 - **`trainer.py`**: Model training with SFTTrainer
 - **`inference.py`**: Model inference, text generation, and sample comparison
 - **`model_saver.py`**: Model saving in various formats (LoRA, merged, GGUF)
+- **`model_converter.py`**: Model format conversion (merged, GGUF) for deployment
+- **`vllm_server.py`**: OpenAI-compatible API server using vLLM for model serving
 - **`train_pipeline.py`**: Core orchestration pipeline (used by CLI)
 
 ## Prerequisites
@@ -121,8 +123,10 @@ Please select an option:
 1. Run Supervised Fine-Tuning (SFT)
 2. Inference with Base Model
 3. Inference with Fine-tuned Model
-4. Check Environment
-5. Exit
+4. Convert Model to Different Formats
+5. Serve Model with vLLM (OpenAI Compatible)
+6. Check Environment
+7. Exit
 ```
 
 ### Option 1: Supervised Fine-Tuning (SFT)
@@ -150,7 +154,126 @@ Tests fine-tuned models:
 - Runs sample comparison using the same samples as base model
 - Provides interactive classification interface
 
-### Option 4: Check Environment
+### Option 4: Convert Model to Different Formats
+
+Converts trained LoRA models to various deployment formats:
+- **Model Discovery**: Automatically finds available trained models in output directory
+- **Multiple Output Formats**:
+  - Merged 16-bit: Full precision merged model (HuggingFace compatible)
+  - Merged 4-bit: Quantized merged model for reduced memory usage
+  - GGUF Q4_0: 4-bit quantized format for llama.cpp
+  - GGUF Q5_0: 5-bit quantized format for llama.cpp
+  - GGUF Q6_K: 6-bit K-quantized format for llama.cpp
+  - GGUF Q8_0: 8-bit quantized format for llama.cpp
+- **Batch Conversion**: Option to convert to multiple formats simultaneously
+- **Automatic Organization**: Creates timestamped conversion directories
+
+#### Conversion Workflow
+1. Select a trained model from available options
+2. Choose conversion format(s):
+   - Single format conversion
+   - Multiple format conversion (recommended for deployment flexibility)
+3. Monitor conversion progress and memory usage
+4. Access converted models in `output/{timestamp}/conversions/` directory
+
+#### Output Structure After Conversion
+```
+output/
+└── 20240115_143022/
+    ├── lora_unsloth_model/           # Original LoRA adapter
+    └── conversions/                  # Converted models
+        ├── merged_16bit/             # Full precision merged model
+        ├── merged_4bit/              # Quantized merged model
+        ├── gguf_q4_0/               # GGUF 4-bit quantized
+        ├── gguf_q5_0/               # GGUF 5-bit quantized
+        ├── gguf_q6_k/               # GGUF 6-bit K-quantized
+        └── gguf_q8_0/               # GGUF 8-bit quantized
+```
+
+### Option 5: Serve Model with vLLM (OpenAI Compatible)
+
+**Make sure you installed the latest vllm with desired torch version.**
+
+> Follow the instructions [here](https://docs.vllm.ai/en/latest/getting_started/installation/index.html) to install vllm properly.
+>
+> You may install vllm in a seperate conda environment and actiavte it only when you need to use vllm.
+
+Deploys models as OpenAI-compatible API servers using vLLM:
+
+#### Model Source Options
+- **Local Models**: Use trained/converted models from the pipeline
+- **Hugging Face Models**: Load any compatible model directly from HuggingFace Hub
+
+#### Server Configuration Options
+- **Simple Setup**: Auto-detect GPUs, serve on 0.0.0.0:8000
+  - Automatically detects available GPUs
+  - Enables tensor parallelism for multi-GPU setups
+  - Uses sensible defaults for quick deployment
+- **Advanced Configuration**: Custom settings with user prompts
+  - Host and port configuration
+  - Tensor parallel size for multi-GPU setups
+  - Max model length and memory utilization
+  - Reasoning parser and optimization settings
+- **JSON Configuration**: Load settings from vllm_config.json
+  - Pre-configured deployment settings
+  - Support for all vLLM command-line arguments
+  - Reproducible server configurations
+
+#### vLLM Configuration File (vllm_config.json)
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8000,
+  "reasoning-parser": "qwen3",
+  "max-model-len": 10000,
+  "tensor-parallel-size": 2,
+  "trust-remote-code": true,
+  "enable-prompt-tokens-details": true,
+  "max-num-batched-tokens": 4096,
+  "gpu-memory-utilization": 0.90,
+  "enable-chunked-prefill": true,
+  "disable-log-requests": true,
+  "served-model-name": "scam-detection-model"
+}
+```
+
+
+#### Quick Check Server
+
+**Using curl:**
+
+```bash
+# check server status
+curl -X GET "http://localhost:8000/health"
+
+# check server docs
+curl -X GET "http://localhost:8000/docs"
+
+# check server models
+curl -X GET "http://localhost:8000/v1/models"
+```
+
+```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "scam-detection-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an AI assistant specialised in detecting scam or legitimate content."
+      },
+      {
+        "role": "user",
+        "content": "Here is a content that you need to classify: Click here to claim your prize!"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7
+  }'
+```
+
+### Option 6: Check Environment
 
 Comprehensive environment diagnostics:
 - **System Information**: Python version, platform
@@ -158,6 +281,56 @@ Comprehensive environment diagnostics:
 - **Library Versions**: torch, unsloth, transformers, bitsandbytes, triton, etc.
 - **Attention Mechanisms**: Flash Attention, xformers, PyTorch native SDPA
 - **PyTorch Configuration**: CUDA build status, cuDNN, MPS, XPU support
+
+## Deployment Workflows
+
+Follow the instructions for the full pipeline:
+
+### 1. Local API Server Deployment
+
+For local development and testing:
+
+```bash
+# Train a model
+python main.py  # Select Option 1
+
+# Convert for deployment
+python main.py  # Select Option 4 -> Choose merged format
+
+# Serve with vLLM
+python main.py  # Select Option 5 -> Simple setup
+```
+
+### 2. Evaluation with scam detection pipeline
+```bash
+cd .. # cd out of the scam-sft directory
+git clone https://github.com/Chen-zexi/scam-detection.git # clone the repo if you haven't done so
+cd scam-detection
+# Follow the instructions in the repo to set up before proceed
+uv run main.py # Select Evaluation -> choose vllm as API Provider
+```
+
+### 3. Use the fine-tuned model in the vocie detction pipeline
+```bash
+cd .. # cd out of the scam-sft directory
+# clone the voice detection repo if you haven't done so
+# cd into the repo
+# configure provider and model in app/core/config.py
+# Follow the instructions in the repo to run the pipeline
+```
+
+## Model Format Selection Guide
+
+Choose the appropriate format based on your deployment needs:
+
+- **LoRA Adapters**: Training and fine-tuning (smallest storage)
+- **Merged 16-bit**: Production serving with vLLM (best quality)
+- **Merged 4-bit**: Memory-constrained environments (good quality, less memory)
+- **GGUF Formats**: llama.cpp integration, edge deployment
+  - Q4_0: Fastest inference, lowest quality
+  - Q5_0: Balanced speed and quality
+  - Q6_K: Better quality, moderate speed
+  - Q8_0: Highest quality, slower inference
 
 ## Sample Comparison Feature
 
@@ -266,54 +439,6 @@ output/
 - **`training_config.json`**: Contains all configuration parameters used for training
 - **`training_summary.json`**: Contains training statistics, memory usage, and run metadata
 
-## Advanced Usage
-
-### Direct Pipeline Access
-
-For advanced users, the pipeline can be accessed directly:
-
-```python
-from src.train_pipeline import FineTuningPipeline, create_default_configs
-from src.config import *
-
-# Create configurations
-configs = create_default_configs()
-model_config, lora_config, training_config, data_config, inference_config, save_config = configs
-
-# Customize configurations as needed
-training_config.max_steps = 100
-data_config.data_path = "path/to/custom/data.csv"
-
-# Create and run pipeline
-pipeline = FineTuningPipeline(
-    model_config=model_config,
-    lora_config=lora_config,
-    training_config=training_config,
-    data_config=data_config,
-    inference_config=inference_config,
-    save_config=save_config
-)
-
-results = pipeline.run_full_pipeline()
-```
-
-### Batch Inference
-
-```python
-from src.inference import ModelInference
-from src.model_loader import ModelLoader
-
-# Load model
-model_loader = ModelLoader(model_config, lora_config)
-model, tokenizer = model_loader.load_pretrained_lora("path/to/fine_tuned_model")
-
-# Create inference handler
-inference = ModelInference(model, tokenizer, inference_config)
-
-# Batch classify
-contents = ["Text 1", "Text 2", "Text 3"]
-results = inference.batch_classify(contents)
-```
 
 ## Environment Verification
 
@@ -391,6 +516,20 @@ XPU Available (Intel): False
    - Monitor training loss through sample comparison
    - Experiment with learning rates and training steps
 
+4. **Deployment Optimization**:
+   - Use merged models for vLLM serving (better than LoRA adapters)
+   - Choose appropriate quantization level (4-bit for memory, 16-bit for quality)
+   - Enable tensor parallelism for multi-GPU setups
+   - Use GGUF formats for llama.cpp integration
+   - Configure vLLM memory utilization based on available VRAM
+
+5. **Server Performance**:
+   - Monitor GPU utilization during serving
+   - Adjust max_model_len based on typical input lengths
+   - Use appropriate batch sizes for concurrent requests
+   - Enable chunked prefill for long sequences
+   - Configure reasonable timeout values for production
+
 ## Troubleshooting
 
 ### Common Issues
@@ -413,6 +552,25 @@ XPU Available (Intel): False
    - Adjust learning rate and training steps
    - Ensure balanced dataset with both classes
 
+4. **Model Conversion Issues**:
+   - Ensure sufficient disk space for converted models
+   - Check CUDA memory for large model conversions
+   - Verify original model is properly trained and saved
+   - Use 4-bit conversion for memory-constrained systems
+
+5. **vLLM Server Problems**:
+   - Check GPU compatibility with vLLM requirements
+   - Verify model format is compatible (merged models recommended)
+   - Ensure port is not already in use
+   - Check firewall settings for network access
+   - Use single GPU mode if tensor parallel fails
+
+6. **Hugging Face Model Loading**:
+   - Verify internet connection for model download
+   - Check model compatibility with vLLM
+   - Ensure sufficient disk space for model caching
+   - Verify HuggingFace Hub access permissions
+
 ### CUDA Debug
 
 Enable more detailed debug by setting environment variables:
@@ -421,12 +579,3 @@ Enable more detailed debug by setting environment variables:
 export CUDA_LAUNCH_BLOCKING=1
 export TORCH_SHOW_CPP_STACKTRACES=1
 ```
-
-## Model Evaluation
-
-The pipeline provides comprehensive model evaluation through:
-
-1. **Sample Comparison**: Systematic testing on dataset samples
-2. **Interactive Testing**: Real-time classification testing
-3. **Performance Metrics**: Training loss tracking and comparison
-4. **Before/After Analysis**: Direct comparison of base vs fine-tuned models
