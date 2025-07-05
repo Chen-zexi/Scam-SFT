@@ -1,6 +1,5 @@
+# Core dependencies (always safe to install together)
 torch
-unsloth
-unsloth-zoo
 trl
 datasets
 pandas
@@ -8,3 +7,11 @@ numpy
 accelerate
 bitsandbytes
 triton
+requests
+
+# Training dependencies (import only when needed to avoid vLLM conflicts)
+unsloth
+unsloth-zoo
+
+# vLLM server dependencies (install separately if using server)
+# vllm

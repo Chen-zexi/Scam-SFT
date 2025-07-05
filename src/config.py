@@ -7,7 +7,7 @@ from datetime import datetime
 @dataclass
 class ModelConfig:
     """Configuration for model loading and LoRA setup"""
-    model_name: str = "unsloth/DeepSeek-R1-Distill-Qwen-14B-unsloth-bnb-4bit"
+    model_name: str = "unsloth/Qwen3-4B-unsloth-bnb-4bit"
     max_seq_length: int = 2048
     load_in_4bit: bool = True
     load_in_8bit: bool = False

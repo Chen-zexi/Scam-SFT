@@ -1,0 +1,14 @@
+{
+  "host": "0.0.0.0",
+  "port": 8000,
+  "reasoning-parser": "qwen3",
+  "max-model-len": 10000,
+  "tensor-parallel-size": 2,
+  "trust-remote-code": true,
+  "enable-prompt-tokens-details": true,
+  "max-num-batched-tokens": 4096,
+  "gpu-memory-utilization": 0.90,
+  "enable-chunked-prefill": true,
+  "disable-log-requests": true,
+  "served-model-name": "scam-detection-model"
+}

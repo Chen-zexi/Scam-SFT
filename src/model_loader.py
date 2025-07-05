@@ -1,10 +1,16 @@
 import torch
-from unsloth import FastLanguageModel
 from typing import Tuple
 from .config import ModelConfig, LoRAConfig
 
+# Import unsloth only when needed to avoid vLLM conflicts
+try:
+    from unsloth import FastLanguageModel
+    UNSLOTH_AVAILABLE = True
+except ImportError:
+    UNSLOTH_AVAILABLE = False
+    FastLanguageModel = None
+
 class ModelLoader:
-    """Handles model loading and LoRA adapter setup"""
     
     def __init__(self, model_config: ModelConfig, lora_config: LoRAConfig):
         self.model_config = model_config
@@ -13,7 +19,6 @@ class ModelLoader:
         self.tokenizer = None
     
     def setup_gpu_buffers(self) -> None:
-        """Setup GPU memory buffers for optimization"""
         dtype = self.model_config.dtype
         n_gpus = torch.cuda.device_count()
         
@@ -25,7 +30,9 @@ class ModelLoader:
         print(f"Set up GPU buffers for {n_gpus} GPUs")
     
     def load_base_model(self) -> Tuple[object, object]:
-        """Load the base model and tokenizer"""
+        if not UNSLOTH_AVAILABLE:
+            raise ImportError("Unsloth is not available. This is required for model loading.")
+            
         print(f"Loading model: {self.model_config.model_name}")
         
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
@@ -42,7 +49,9 @@ class ModelLoader:
         return self.model, self.tokenizer
     
     def setup_lora(self) -> object:
-        """Setup LoRA adapters on the loaded model"""
+        if not UNSLOTH_AVAILABLE:
+            raise ImportError("Unsloth is not available. This is required for LoRA setup.")
+            
         if self.model is None:
             raise ValueError("Model must be loaded before setting up LoRA")
         
@@ -65,7 +74,6 @@ class ModelLoader:
         return self.model
     
     def load_and_setup(self) -> Tuple[object, object]:
-        """Complete model loading and LoRA setup pipeline"""
         self.setup_gpu_buffers()
         self.load_base_model()
         self.setup_lora()
@@ -73,7 +81,9 @@ class ModelLoader:
         return self.model, self.tokenizer
     
     def load_pretrained_lora(self, lora_path: str) -> Tuple[object, object]:
-        """Load a previously saved LoRA model"""
+        if not UNSLOTH_AVAILABLE:
+            raise ImportError("Unsloth is not available. This is required for loading LoRA models.")
+            
         print(f"Loading LoRA model from: {lora_path}")
         
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(

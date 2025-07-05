@@ -7,3 +7,5 @@ __pycache__/
 *:Zone.Identifier
 .env
 .DS_Store
+
+CLAUDE.md
