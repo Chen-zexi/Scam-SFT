@@ -127,11 +127,59 @@ class ModelSaver:
                          token: Optional[str] = None) -> str:
         """Save merged model in specified format"""
         
-        valid_methods = ["merged_16bit", "merged_4bit", "lora"]
+        valid_methods = ["merged_16bit", "merged_4bit", "merged_4bit_forced", "lora"]
         if save_method not in valid_methods:
             raise ValueError(f"Invalid save_method. Must be one of: {valid_methods}")
         
         print(f"Saving merged model with method: {save_method}")
+        
+        # Handle the known Unsloth issues with 4-bit merging
+        if save_method == "merged_4bit_forced":
+            print("Warning: merged_4bit_forced has known bugs in Unsloth and may fail")
+            print("This is due to internal Unsloth issues with 'base_model' variable scope")
+            print("Recommending merged_16bit for best compatibility and reliability")
+            
+            # Try the forced method, but catch the known base_model error
+            try:
+                if push_to_hub:
+                    if not hub_repo_name or not token:
+                        raise ValueError("hub_repo_name and token are required for pushing to hub")
+                    
+                    print(f"Attempting to push merged model to Hub: {hub_repo_name}")
+                    self.model.push_to_hub_merged(
+                        hub_repo_name, 
+                        self.tokenizer, 
+                        save_method=save_method, 
+                        token=token
+                    )
+                    print(f"Merged model pushed successfully to {hub_repo_name}")
+                    return hub_repo_name
+                else:
+                    os.makedirs(output_dir, exist_ok=True)
+                    print("Attempting 4-bit forced merge (may fail due to Unsloth bugs)...")
+                    self.model.save_pretrained_merged(
+                        output_dir, 
+                        self.tokenizer, 
+                        save_method=save_method
+                    )
+                    print(f"Merged model saved successfully to {output_dir}")
+                    return output_dir
+            except Exception as e:
+                error_msg = str(e)
+                if "base_model" in error_msg:
+                    print(f"Known Unsloth bug encountered: {error_msg}")
+                    print("This is a bug in Unsloth's 4-bit merging implementation")
+                    print("Solution: Use option 1 (merged_16bit) which is more reliable")
+                    raise Exception(f"Unsloth 4-bit merging bug: 'base_model' not defined. Use merged_16bit instead.")
+                else:
+                    print(f"4-bit merging failed with error: {error_msg}")
+                    raise Exception(f"4-bit merging failed. Please use merged_16bit instead. Error: {error_msg}")
+                    
+        # Handle regular merged_4bit (will show warning but not forced)
+        if save_method == "merged_4bit":
+            print("Note: Unsloth will show a warning about accuracy loss for merged_4bit")
+            print("The conversion will fail and suggest using merged_4bit_forced")
+            print("However, merged_4bit_forced has known bugs. Consider merged_16bit instead.")
         
         if push_to_hub:
             if not hub_repo_name or not token:

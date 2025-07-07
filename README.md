@@ -129,6 +129,11 @@ Please select an option:
 7. Exit
 ```
 
+**Note:** Option 5 now supports three model sources:
+- Local trained/converted models
+- Hugging Face models  
+- LoRA adapters with base models
+
 ### Option 1: Supervised Fine-Tuning (SFT)
 
 Runs the complete fine-tuning pipeline:
@@ -203,6 +208,7 @@ Deploys models as OpenAI-compatible API servers using vLLM:
 #### Model Source Options
 - **Local Models**: Use trained/converted models from the pipeline
 - **Hugging Face Models**: Load any compatible model directly from HuggingFace Hub
+- **LoRA Adapters**: Serve LoRA adapters with their original base models
 
 #### Server Configuration Options
 - **Simple Setup**: Auto-detect GPUs, serve on 0.0.0.0:8000
@@ -272,6 +278,27 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
     "temperature": 0.7
   }'
 ```
+
+#### LoRA Adapter Serving
+
+Serve LoRA adapters directly with their base models for efficient inference:
+
+**Features:**
+- Automatic base model detection from adapter configuration
+- Single GPU enforcement for quantized base models
+- Multiple LoRA adapter support
+- Seamless integration with OpenAI-compatible API
+
+**Usage:**
+1. Select Option 5 → Choose model source → Select "3. Use LoRA adapter with base model"
+2. Choose from available trained LoRA adapters
+3. Server automatically loads the original base model with LoRA adapter applied
+4. Configure server settings (simple/advanced/JSON)
+
+**Important Notes:**
+- Quantized base models (e.g., `unsloth/Qwen3-4B-unsloth-bnb-4bit`) automatically use single GPU mode
+- LoRA adapters are served efficiently with minimal memory overhead
+- API calls use the same endpoints as regular model serving
 
 ### Option 6: Check Environment
 

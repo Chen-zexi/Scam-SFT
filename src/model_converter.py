@@ -46,8 +46,8 @@ class ModelConverter:
     
     def display_conversion_options(self) -> None:
         print("\nAvailable conversion formats:")
-        print("1. Merged 16-bit (vllm compatible [Recommended])")
-        print("2. Merged 4-bit (vllm compatible)")
+        print("1. Merged 16-bit (vllm compatible [Recommended - Most Reliable])")
+        print("2. Merged 4-bit (vllm compatible [Warning: Known Unsloth bugs])")
         print("3. GGUF Q8_0 (llama.cpp compatible)")
         print("4. GGUF Q4_0 (llama.cpp compatible)")
         print("5. GGUF Q5_0 (llama.cpp compatible)")
@@ -55,6 +55,7 @@ class ModelConverter:
         print("7. GGUF Q6_K (llama.cpp compatible)")
         print("8. Multiple GGUF formats")
         print("9. All formats")
+        print("\nNote: Option 2 (4-bit) has known bugs in Unsloth and may fail.")
     
     def get_conversion_choice(self) -> tuple:
         while True:
@@ -67,7 +68,7 @@ class ModelConverter:
                 if 1 <= choice_num <= 9:
                     format_map = {
                         1: ("merged", "merged_16bit"),
-                        2: ("merged", "merged_4bit"),
+                        2: ("merged", "merged_4bit_forced"),
                         3: ("gguf", "q8_0"),
                         4: ("gguf", "q4_0"),
                         5: ("gguf", "q5_0"),
@@ -124,7 +125,7 @@ class ModelConverter:
                 
                 # Merged 4-bit
                 merged_4_dir = os.path.join(conversion_dir, "merged_4bit")
-                model_saver.save_merged_model(merged_4_dir, save_method="merged_4bit")
+                model_saver.save_merged_model(merged_4_dir, save_method="merged_4bit_forced")
                 print(f" Merged 4-bit saved to: {merged_4_dir}")
                 
                 # Multiple GGUF formats

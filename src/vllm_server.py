@@ -91,6 +91,65 @@ class VLLMServer:
         
         return sorted(models, key=lambda x: x[2], reverse=True)
     
+    def get_available_lora_adapters(self) -> List[Dict[str, str]]:
+        """Get list of available LoRA adapters with metadata."""
+        adapters = []
+        output_dir = Path("output")
+        
+        if not output_dir.exists():
+            return adapters
+        
+        for timestamp_dir in output_dir.iterdir():
+            if timestamp_dir.is_dir():
+                for model_dir in timestamp_dir.iterdir():
+                    if model_dir.is_dir() and model_dir.name.startswith("lora_"):
+                        adapter_config_path = model_dir / "adapter_config.json"
+                        if adapter_config_path.exists():
+                            try:
+                                base_model = self.get_base_model_from_adapter(str(adapter_config_path))
+                                adapters.append({
+                                    "path": str(model_dir),
+                                    "name": model_dir.name,
+                                    "base_model": base_model,
+                                    "timestamp": timestamp_dir.name,
+                                    "adapter_config": str(adapter_config_path)
+                                })
+                            except Exception as e:
+                                print(f"Warning: Could not read adapter config from {adapter_config_path}: {e}")
+        
+        return sorted(adapters, key=lambda x: x["timestamp"], reverse=True)
+    
+    def get_base_model_from_adapter(self, adapter_config_path: str) -> str:
+        """Extract base model name from adapter config."""
+        try:
+            with open(adapter_config_path, 'r') as f:
+                config = json.load(f)
+                return config.get("base_model_name_or_path", "unknown")
+        except Exception as e:
+            print(f"Error reading adapter config: {e}")
+            return "unknown"
+    
+    def get_compatible_adapters(self, base_model: str) -> List[Dict[str, str]]:
+        """Get LoRA adapters compatible with the specified base model."""
+        all_adapters = self.get_available_lora_adapters()
+        compatible = []
+        
+        for adapter in all_adapters:
+            if adapter["base_model"] == base_model:
+                compatible.append(adapter)
+        
+        return compatible
+    
+    def is_quantized_model(self, model_name: str) -> bool:
+        """Check if a model is quantized (BitsAndBytes)."""
+        quantized_indicators = [
+            "bnb-4bit", "bnb-8bit", "4bit", "8bit", 
+            "unsloth", "gptq", "awq", "eetq"
+        ]
+        
+        model_lower = model_name.lower()
+        return any(indicator in model_lower for indicator in quantized_indicators)
+    
     def validate_huggingface_model(self, model_name: str) -> bool:
         """Validate if a Hugging Face model exists and is accessible."""
         try:
@@ -159,7 +218,12 @@ class VLLMServer:
             "enable_prompt_tokens_details": False,
             "max_num_batched_tokens": None,
             "gpu_memory_utilization": None,
-            "enable_chunked_prefill": False
+            "enable_chunked_prefill": False,
+            "enable_lora": False,
+            "lora_modules": {},
+            "max_loras": 1,
+            "max_lora_rank": 32,
+            "lora_dtype": "auto"
         }
         
         print(f"\nSimple setup configured:")
@@ -186,7 +250,12 @@ class VLLMServer:
             "enable_prompt_tokens_details": False,
             "max_num_batched_tokens": None,
             "gpu_memory_utilization": None,
-            "enable_chunked_prefill": False
+            "enable_chunked_prefill": False,
+            "enable_lora": False,
+            "lora_modules": {},
+            "max_loras": 1,
+            "max_lora_rank": 32,
+            "lora_dtype": "auto"
         }
         
         print("\nAdvanced Configuration:")
@@ -261,6 +330,26 @@ class VLLMServer:
         # Enable chunked prefill
         chunked_prefill = input("Enable chunked prefill? (y/n) [y]: ").strip().lower()
         config["enable_chunked_prefill"] = chunked_prefill != 'n'
+        
+        # LoRA configuration (for non-LoRA servers, these will be ignored)
+        print("\nLoRA Configuration (optional):")
+        max_loras_input = input("Max LoRAs [1]: ").strip()
+        if max_loras_input:
+            try:
+                config["max_loras"] = int(max_loras_input)
+            except ValueError:
+                config["max_loras"] = 1
+        
+        max_lora_rank_input = input("Max LoRA rank [32]: ").strip()
+        if max_lora_rank_input:
+            try:
+                config["max_lora_rank"] = int(max_lora_rank_input)
+            except ValueError:
+                config["max_lora_rank"] = 32
+        
+        lora_dtype_input = input("LoRA dtype [auto]: ").strip()
+        if lora_dtype_input:
+            config["lora_dtype"] = lora_dtype_input
         
         return config
     
@@ -433,6 +522,27 @@ class VLLMServer:
             # Enable chunked prefill
             if server_config.get("enable_chunked_prefill", False):
                 cmd.append("--enable-chunked-prefill")
+            
+            # LoRA configuration
+            if server_config.get("enable_lora", False):
+                cmd.append("--enable-lora")
+                
+                # Add LoRA modules
+                lora_modules = server_config.get("lora_modules", {})
+                for name, path in lora_modules.items():
+                    cmd.extend(["--lora-modules", f"{name}={path}"])
+                
+                # Max LoRAs
+                if server_config.get("max_loras"):
+                    cmd.extend(["--max-loras", str(server_config["max_loras"])])
+                
+                # Max LoRA rank
+                if server_config.get("max_lora_rank"):
+                    cmd.extend(["--max-lora-rank", str(server_config["max_lora_rank"])])
+                
+                # LoRA dtype
+                if server_config.get("lora_dtype") and server_config["lora_dtype"] != "auto":
+                    cmd.extend(["--lora-dtype", server_config["lora_dtype"]])
             
             # Disable log requests for cleaner output
             cmd.append("--disable-log-requests")
@@ -683,9 +793,10 @@ class VLLMServer:
         print("Choose model source:")
         print("1. Use local trained/converted model")
         print("2. Use Hugging Face model (Only FP16 compatible)")
+        print("3. Use LoRA adapter with base model")
         
         while True:
-            source_choice = input("\nSelect model source (1: local, 2: huggingface) [1]: ").strip()
+            source_choice = input("\nSelect model source (1: local, 2: huggingface, 3: lora) [1]: ").strip()
             if not source_choice:
                 source_choice = "1"
             
@@ -749,8 +860,112 @@ class VLLMServer:
                         retry = input("Model validation failed. Try anyway? (y/n): ").strip().lower()
                         if retry == 'y':
                             return self.start_server_with_config(hf_model)
+                            
+            elif source_choice == "3":
+                # LoRA adapter with base model
+                return self.lora_adapter_selection()
+                
             else:
-                print("Please enter 1 or 2")
+                print("Please enter 1, 2, or 3")
+        
+        return False
+    
+    def lora_adapter_selection(self) -> bool:
+        """Handle LoRA adapter selection process."""
+        print("\n" + "=" * 60)
+        print("LORA ADAPTER SELECTION")
+        print("=" * 60)
+        
+        # Get available LoRA adapters
+        lora_adapters = self.get_available_lora_adapters()
+        
+        if not lora_adapters:
+            print("No LoRA adapters found.")
+            print("Please train a model first using the SFT option.")
+            return False
+        
+        print("Available LoRA adapters:")
+        print("-" * 60)
+        for i, adapter in enumerate(lora_adapters, 1):
+            print(f"{i}. {adapter['name']}")
+            print(f"   Base Model: {adapter['base_model']}")
+            print(f"   Timestamp: {adapter['timestamp']}")
+            print(f"   Path: {adapter['path']}")
+            
+            # Check if base model is quantized
+            if self.is_quantized_model(adapter['base_model']):
+                print(f"   ⚠️  Quantized model (single GPU only)")
+            print()
+        
+        while True:
+            try:
+                choice = input(f"Select LoRA adapter (1-{len(lora_adapters)}) or 'b' for back: ").strip()
+                if choice.lower() == 'b':
+                    return False
+                
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(lora_adapters):
+                    selected_adapter = lora_adapters[choice_idx]
+                    return self.start_lora_server(selected_adapter)
+                else:
+                    print(f"Please enter a number between 1 and {len(lora_adapters)}")
+            except ValueError:
+                print("Please enter a valid number or 'b' to go back")
+    
+    def start_lora_server(self, adapter_info: Dict[str, str]) -> bool:
+        """Start server with LoRA adapter configuration."""
+        print(f"\n" + "=" * 60)
+        print("LORA SERVER CONFIGURATION")
+        print("=" * 60)
+        print(f"Selected adapter: {adapter_info['name']}")
+        print(f"Base model: {adapter_info['base_model']}")
+        print(f"Adapter path: {adapter_info['path']}")
+        
+        # Use the base model as the main model
+        base_model = adapter_info['base_model']
+        
+        # Check if base model is quantized (BitsAndBytes)
+        is_quantized = self.is_quantized_model(base_model)
+        if is_quantized:
+            print(f"\n⚠️  Detected quantized base model: {base_model}")
+            print("   Quantized models don't support tensor parallelism in vLLM")
+            print("   Forcing single GPU mode for compatibility")
+        
+        # Get server configuration
+        server_config = self.get_server_config()
+        
+        if server_config is None:
+            print("Failed to load configuration.")
+            return False
+        
+        # Force single GPU for quantized models
+        if is_quantized:
+            server_config["tensor_parallel_size"] = 1
+            server_config["gpu_count"] = 1
+            print(f"   Overriding tensor parallel size to 1")
+        
+        # Add LoRA configuration to server config
+        server_config["enable_lora"] = True
+        server_config["lora_modules"] = {
+            "scam_adapter": adapter_info['path']
+        }
+        
+        if self.start_server(base_model, server_config):
+            print("\n" + "=" * 60)
+            print("LORA SERVER RUNNING")
+            print("=" * 60)
+            print(f"Base Model: {base_model}")
+            print(f"LoRA Adapter: {adapter_info['name']}")
+            print("Server control options:")
+            print("   • Press Ctrl+C for graceful shutdown")
+            print("   • Type 'stop' + Enter for graceful shutdown")
+            print("   • Type 'force-stop' + Enter for immediate shutdown")
+            print("   • Type 'status' + Enter for server status")
+            print("   • Type 'help' + Enter for command list")
+            print("=" * 60)
+            
+            # Start server monitoring
+            return self.monitor_server()
         
         return False
     
@@ -765,8 +980,6 @@ class VLLMServer:
             return False
         
         if self.start_server(selected_model, server_config):
-            self.show_usage_examples()
-            
             print("\n" + "=" * 60)
             print("SERVER RUNNING")
             print("=" * 60)
@@ -790,8 +1003,6 @@ class VLLMServer:
             server_config["gpu_count"] = 1
             
             if self.start_server(selected_model, server_config):
-                self.show_usage_examples()
-                
                 print("\n" + "=" * 60)
                 print("SERVER RUNNING (Single GPU)")
                 print("=" * 60)
@@ -839,8 +1050,6 @@ class VLLMServer:
             command_thread.start()
             
             print("\nMonitoring server output (Press Ctrl+C to stop):")
-            print("-" * 60)
-            print("Server is running - press Ctrl+C for graceful shutdown")
             print("-" * 60)
             
             while self.server_process and self.server_process.poll() is None and not self.shutdown_event.is_set():
